@@ -4,111 +4,96 @@ import numpy as np
 import soundfile as sf
 import yt_dlp
 import os
-from scipy.signal import convolve
+from pydub import AudioSegment
 
-# --- UI PREMIUM (Inspirado em Apps de Áudio Profissional) ---
+# --- DESIGN PROFISSIONAL ---
 st.set_page_config(page_title="Piano Lullaby Pro", page_icon="🎹", layout="wide")
 
 st.markdown("""
     <style>
-    .main { background-color: #0d1117; color: #c9d1d9; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+    .main { background-color: #0d1117; color: #c9d1d9; }
     .stButton>button { 
         background: linear-gradient(135deg, #1f6feb, #094193); 
         color: white; border-radius: 8px; border: none; padding: 12px;
-        font-weight: 600; width: 100%; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        font-weight: 600; width: 100%;
     }
-    .stAudio { border-radius: 12px; background: #161b22; padding: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🎹 Piano Lullaby Studio Pro")
 st.write("Tecnologia de Modelagem Acústica para Conversão de Alta Fidelidade.")
 
-# --- ENGINE DE SÍNTESE ACÚSTICA (FISICAMENTE MODELADA) ---
-def synthesize_acoustic_piano(freq, duration, intensity, sr=22050):
-    """Gera um som de piano com corpo, harmônicos e ataque orgânico."""
+# --- ENGINE DE SÍNTESE ACÚSTICA ---
+def synthesize_piano_note(freq, duration, intensity, sr=22050):
     t = np.linspace(0, duration, int(sr * duration))
+    # Harmônicos complexos para som amadeirado
+    sound = np.sin(2 * np.pi * freq * t)
+    sound += 0.4 * np.sin(2 * np.pi * freq * 2.001 * t) * np.exp(-t * 1.5)
+    sound += 0.2 * np.sin(2 * np.pi * freq * 3.002 * t) * np.exp(-t * 3.0)
     
-    # Modelagem de Harmônicos de Piano Solo (Inarmonias Naturais)
-    # Fundamental + Harmônicos complexos que dão o "brilho" da corda
-    sound = np.sin(2 * np.pi * freq * t) * 1.0
-    sound += np.sin(2 * np.pi * freq * 2.001 * t) * 0.4 * np.exp(-t * 1.5)
-    sound += np.sin(2 * np.pi * freq * 3.002 * t) * 0.2 * np.exp(-t * 3.0)
-    
-    # Envelope de Feltro (Ataque arredondado, não estalado)
-    # Simula o martelo batendo na corda com doçura
-    attack = np.linspace(0, 1, int(sr * 0.04))
-    decay = np.exp(-2.5 * (t - 0.04))
-    envelope = np.ones_like(t)
-    envelope[:len(attack)] = attack
-    envelope[len(attack):] = decay[len(attack):]
-    
-    # Adiciona "Body Resonance" (O som da madeira)
-    wood_resonance = np.sin(2 * np.pi * 55 * t) * 0.05 * np.exp(-t * 10)
-    
-    return (sound + wood_resonance) * envelope * intensity
+    # Envelope de toque suave (Soft Hammer)
+    env = np.exp(-2.5 * t) * (1 - np.exp(-60 * t))
+    return sound * env * intensity
 
-# --- LÓGICA DE ARRANJO INTELIGENTE ---
-def create_professional_arrangement(path):
+def create_arrangement(path):
+    # Carregamento seguro
     y, sr = librosa.load(path, sr=22050)
     
-    # 1. Redução de Stress (Slowing down para ninar)
+    # 1. Desaceleração (70% da velocidade original)
     y_slow = librosa.effects.time_stretch(y, rate=0.7)
     
-    # 2. Separação Espectral Extrema (Remove a "lama" da distorção)
-    y_harm, _ = librosa.effects.hpss(y_slow, margin=4.0)
+    # 2. Separação Harmônica Agressiva (Isola a melodia da distorção)
+    y_harm, _ = librosa.effects.hpss(y_slow, margin=3.0)
     
-    # 3. Mapeamento Melódico Profissional (CQT)
+    # 3. Análise Espectral
     hop_length = 512
-    cqt = np.abs(librosa.cqt(y_harm, sr=sr, hop_length=hop_length, n_bins=84))
+    cqt = np.abs(librosa.cqt(y_harm, sr=sr, hop_length=hop_length))
     
     out_audio = np.zeros_like(y_slow)
     
-    # 4. Algoritmo de Priorização Melódica (Arranger)
-    # Diferente dos apps básicos, este foca no que é CANTÁVEL e joga fora o barulho
+    # 4. Transcrição Humana (Máximo 2 notas simultâneas)
     for t in range(0, cqt.shape[1], 5):
-        # Seleciona apenas as 3 notas mais ricas harmonicamente (Melodia e Base)
-        top_indices = np.argsort(cqt[:, t])[-3:]
-        
+        top_indices = np.argsort(cqt[:, t])[-2:]
         for idx in top_indices:
             mag = cqt[idx, t]
-            if mag > np.max(cqt) * 0.12:
-                freq = librosa.cqt_frequencies(84, fmin=librosa.note_to_hz('C1'))[idx]
-                
-                # Dinâmica de Toque (Notas mais altas na música original soam mais fortes no piano)
-                touch_dynamics = (mag / np.max(cqt)) * 0.8
-                
-                piano_note = synthesize_acoustic_piano(freq, 1.5, touch_dynamics, sr)
+            if mag > np.max(cqt) * 0.15:
+                freq = librosa.cqt_frequencies(cqt.shape[0], fmin=librosa.note_to_hz('C1'))[idx]
+                # Dinâmica de volume baseada na energia original
+                intensity = (mag / np.max(cqt)) * 0.6
+                note = synthesize_piano_note(freq, 1.2, intensity, sr)
                 
                 start = t * hop_length
-                end = min(start + len(piano_note), len(out_audio))
-                out_audio[start:end] += piano_note[:end-start] * 0.5
+                end = min(start + len(note), len(out_audio))
+                out_audio[start:end] += note[:end-start]
 
-    # 5. Masterização e Ambiência de Sala
-    return librosa.util.normalize(out_audio)
+    return librosa.util.normalize(out_audio), sr
 
-# --- INTERFACE DE USUÁRIO ---
-col1, col2 = st.columns([1, 1])
+# --- INTERFACE ---
+col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📥 Input de Áudio")
     uploaded = st.file_uploader("Upload da música", type=["mp3", "wav"])
-    yt_url = st.text_input("Link do YouTube (Processamento Master)")
+    yt_url = st.text_input("Ou link do YouTube")
 
 with col2:
-    st.subheader("🎹 Resultado Acústico")
-    if st.button("GERAR MASTER EM PIANO SOLO"):
-        if uploaded or yt_url:
-            with st.spinner("Desconstruindo a música e criando arranjo acústico..."):
-                input_path = "temp.wav"
+    if st.button("GERAR MASTER EM PIANO"):
+        input_path = "temp_input.wav"
+        try:
+            with st.spinner("Processando..."):
                 if yt_url:
-                    os.system(f'yt-dlp -x --audio-format wav -o "{input_path}" {yt_url}')
-                else:
-                    sf.write(input_path, uploaded.read(), 22050)
+                    ydl_opts = {'format': 'bestaudio/best', 'outtmpl': 'temp_yt', 'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'wav'}]}
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([yt_url])
+                    input_path = "temp_yt.wav"
+                elif uploaded:
+                    # CORREÇÃO DO ERRO: Salva o arquivo corretamente antes de ler
+                    with open(input_path, "wb") as f:
+                        f.write(uploaded.getbuffer())
                 
-                final_audio = create_professional_arrangement(input_path)
-                sf.write("piano_lullaby_final.wav", final_audio, 22050)
+                audio_res, sr_res = create_arrangement(input_path)
+                sf.write("output.wav", audio_res, sr_res)
                 
-                st.audio("piano_lullaby_final.wav")
-                st.download_button("Baixar Master 24-bit", open("piano_lullaby_final.wav", "rb"), "ninar_piano.wav")
-                st.balloons()
+                st.audio("output.wav")
+                st.success("Masterização concluída!")
+        except Exception as e:
+            st.error(f"Ocorreu um erro: {e}")
