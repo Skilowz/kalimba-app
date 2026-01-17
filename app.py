@@ -4,96 +4,124 @@ import numpy as np
 import soundfile as sf
 import yt_dlp
 import os
-from pydub import AudioSegment
+import pretty_midi
+import fluidsynth
 
-# --- DESIGN PROFISSIONAL ---
-st.set_page_config(page_title="Piano Lullaby Pro", page_icon="🎹", layout="wide")
+# ================= UI =================
+st.set_page_config(
+    page_title="Piano Lullaby AI Studio",
+    page_icon="🎹",
+    layout="wide"
+)
 
-st.markdown("""
-    <style>
-    .main { background-color: #0d1117; color: #c9d1d9; }
-    .stButton>button { 
-        background: linear-gradient(135deg, #1f6feb, #094193); 
-        color: white; border-radius: 8px; border: none; padding: 12px;
-        font-weight: 600; width: 100%;
+st.title("🎹 Piano Lullaby AI Studio")
+st.write("Transformando músicas complexas em versões de ninar, com inteligência musical real.")
+
+# ================= HELPERS =================
+
+def download_youtube(url):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': 'input',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'wav'
+        }]
     }
-    </style>
-    """, unsafe_allow_html=True)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+    return "input.wav"
 
-st.title("🎹 Piano Lullaby Studio Pro")
-st.write("Tecnologia de Modelagem Acústica para Conversão de Alta Fidelidade.")
-
-# --- ENGINE DE SÍNTESE ACÚSTICA ---
-def synthesize_piano_note(freq, duration, intensity, sr=22050):
-    t = np.linspace(0, duration, int(sr * duration))
-    # Harmônicos complexos para som amadeirado
-    sound = np.sin(2 * np.pi * freq * t)
-    sound += 0.4 * np.sin(2 * np.pi * freq * 2.001 * t) * np.exp(-t * 1.5)
-    sound += 0.2 * np.sin(2 * np.pi * freq * 3.002 * t) * np.exp(-t * 3.0)
-    
-    # Envelope de toque suave (Soft Hammer)
-    env = np.exp(-2.5 * t) * (1 - np.exp(-60 * t))
-    return sound * env * intensity
-
-def create_arrangement(path):
-    # Carregamento seguro
+def analyze_music(path):
     y, sr = librosa.load(path, sr=22050)
-    
-    # 1. Desaceleração (70% da velocidade original)
-    y_slow = librosa.effects.time_stretch(y, rate=0.7)
-    
-    # 2. Separação Harmônica Agressiva (Isola a melodia da distorção)
-    y_harm, _ = librosa.effects.hpss(y_slow, margin=3.0)
-    
-    # 3. Análise Espectral
-    hop_length = 512
-    cqt = np.abs(librosa.cqt(y_harm, sr=sr, hop_length=hop_length))
-    
-    out_audio = np.zeros_like(y_slow)
-    
-    # 4. Transcrição Humana (Máximo 2 notas simultâneas)
-    for t in range(0, cqt.shape[1], 5):
-        top_indices = np.argsort(cqt[:, t])[-2:]
-        for idx in top_indices:
-            mag = cqt[idx, t]
-            if mag > np.max(cqt) * 0.15:
-                freq = librosa.cqt_frequencies(cqt.shape[0], fmin=librosa.note_to_hz('C1'))[idx]
-                # Dinâmica de volume baseada na energia original
-                intensity = (mag / np.max(cqt)) * 0.6
-                note = synthesize_piano_note(freq, 1.2, intensity, sr)
-                
-                start = t * hop_length
-                end = min(start + len(note), len(out_audio))
-                out_audio[start:end] += note[:end-start]
 
-    return librosa.util.normalize(out_audio), sr
+    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
 
-# --- INTERFACE ---
-col1, col2 = st.columns(2)
+    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+    chords_energy = chroma.mean(axis=1)
 
-with col1:
-    uploaded = st.file_uploader("Upload da música", type=["mp3", "wav"])
-    yt_url = st.text_input("Ou link do YouTube")
+    key_index = np.argmax(chords_energy)
+    key = librosa.midi_to_note(60 + key_index)
 
-with col2:
-    if st.button("GERAR MASTER EM PIANO"):
-        input_path = "temp_input.wav"
-        try:
-            with st.spinner("Processando..."):
-                if yt_url:
-                    ydl_opts = {'format': 'bestaudio/best', 'outtmpl': 'temp_yt', 'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'wav'}]}
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        ydl.download([yt_url])
-                    input_path = "temp_yt.wav"
-                elif uploaded:
-                    # CORREÇÃO DO ERRO: Salva o arquivo corretamente antes de ler
-                    with open(input_path, "wb") as f:
-                        f.write(uploaded.getbuffer())
-                
-                audio_res, sr_res = create_arrangement(input_path)
-                sf.write("output.wav", audio_res, sr_res)
-                
-                st.audio("output.wav")
-                st.success("Masterização concluída!")
-        except Exception as e:
-            st.error(f"Ocorreu um erro: {e}")
+    return {
+        "tempo": tempo,
+        "key": key,
+        "chroma": chroma
+    }
+
+# ================= IA DE REDUÇÃO MUSICAL =================
+
+BABY_SAFE_INTERVALS = [0, 3, 4, 7, 12]  # uníssono, terça, quinta, oitava
+
+def reduce_harmony(chroma):
+    notes = []
+    for t in range(0, chroma.shape[1], 12):
+        frame = chroma[:, t]
+        root = np.argmax(frame)
+
+        for interval in BABY_SAFE_INTERVALS[:2]:
+            notes.append(root + interval)
+
+    return notes
+
+# ================= ARRANJO LULLABY =================
+
+def create_lullaby_score(notes, base_tempo):
+    midi = pretty_midi.PrettyMIDI()
+    piano = pretty_midi.Instrument(program=0)
+
+    time = 0.0
+    tempo = max(55, min(70, base_tempo * 0.65))
+    beat = 60 / tempo
+
+    for n in notes:
+        pitch = 60 + (n % 12)
+        note = pretty_midi.Note(
+            velocity=40,
+            pitch=pitch,
+            start=time,
+            end=time + beat * 2
+        )
+        piano.notes.append(note)
+        time += beat * 2
+
+    midi.instruments.append(piano)
+    midi.write("lullaby.mid")
+
+# ================= RENDERIZAÇÃO REAL =================
+
+def render_piano():
+    fs = fluidsynth.Synth()
+    fs.start(driver="alsa" if os.name != "nt" else "dsound")
+
+    fs.sfload("piano_felt.sf2", reset_presets=True)
+    fs.program_select(0, 0, 0, 0)
+
+    fs.midi_to_audio("lullaby.mid", "output.wav")
+    fs.delete()
+
+# ================= STREAMLIT =================
+
+uploaded = st.file_uploader("Upload MP3 ou WAV", type=["mp3", "wav"])
+yt_url = st.text_input("Ou cole um link do YouTube")
+
+if st.button("🎼 GERAR LULLABY PROFISSIONAL"):
+    try:
+        with st.spinner("Analisando música com IA musical..."):
+            if yt_url:
+                path = download_youtube(yt_url)
+            else:
+                path = "input.wav"
+                with open(path, "wb") as f:
+                    f.write(uploaded.getbuffer())
+
+            analysis = analyze_music(path)
+            notes = reduce_harmony(analysis["chroma"])
+            create_lullaby_score(notes, analysis["tempo"])
+            render_piano()
+
+            st.audio("output.wav")
+            st.success("Versão de ninar criada com sucesso!")
+
+    except Exception as e:
+        st.error(str(e))
