@@ -2,97 +2,85 @@ import streamlit as st
 import librosa
 import numpy as np
 import soundfile as sf
-import time
+import yt_dlp
+import os
 
-# --- CONFIGURAÇÃO ESTÉTICA (UI/UX) ---
-st.set_page_config(page_title="Kalimba AI Studio", page_icon="💎", layout="wide")
+# --- DESIGN E CONFIGURAÇÃO ---
+st.set_page_config(page_title="Kalimba AI Pro", page_icon="✨", layout="wide")
 
 st.markdown("""
     <style>
-    .main { background: linear-gradient(135deg, #1e1e2f 0%, #2d3436 100%); color: white; }
-    .stButton>button {
-        background: linear-gradient(45deg, #00dbde 0%, #fc00ff 100%);
-        color: white; border: none; border-radius: 20px;
-        padding: 10px 30px; font-weight: bold; transition: 0.3s;
+    .main { background: #0e1117; color: white; }
+    .stTabs [data-baseweb="tab-list"] { gap: 20px; }
+    .stTabs [data-baseweb="tab"] { 
+        background-color: #1e212b; border-radius: 10px; padding: 10px 20px; color: white;
     }
-    .stButton>button:hover { transform: scale(1.05); box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
-    .upload-box { border: 2px dashed #4facfe; border-radius: 15px; padding: 20px; text-align: center; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- INTERFACE ---
 st.title("💎 Kalimba AI Studio")
-st.subheader("Transforme áudio em arte cristalina com Inteligência Artificial")
+st.write("Transforme links ou arquivos em melodias de Kalimba.")
 
-col1, col2 = st.columns([1, 1])
+# --- FUNÇÕES DE DOWNLOAD ---
+def download_youtube(url):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': 'yt_audio.%(ext)s',
+        'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'wav','preferredquality': '192',}],
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+    return "yt_audio.wav"
 
-with col1:
-    st.markdown("### 1. Input")
-    uploaded_file = st.file_uploader("Arraste sua música aqui", type=["mp3", "wav", "m4a"])
-    
+# --- INTERFACE POR ABAS ---
+tab1, tab2, tab3 = st.tabs(["📁 Arquivo Local", "🎥 YouTube", "🎧 Spotify"])
+
+audio_source = None
+
+with tab1:
+    uploaded_file = st.file_uploader("Upload MP3/WAV", type=["mp3", "wav"])
     if uploaded_file:
-        st.audio(uploaded_file)
-        quality = st.select_slider("Refinamento do Timbre", options=["Standard", "High-Res", "Ultra-Articulated"])
+        audio_source = uploaded_file
 
-with col2:
-    st.markdown("### 2. Output")
-    if uploaded_file is not None:
-        if st.button("GERAR VERSÃO KALIMBA"):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+with tab2:
+    yt_url = st.text_input("Cole o link do vídeo do YouTube")
+    if yt_url:
+        if st.button("Extrair Áudio do YouTube"):
+            with st.spinner("Baixando do YouTube..."):
+                audio_source = download_youtube(yt_url)
+                st.success("Áudio pronto para conversão!")
 
-            # --- PROCESSAMENTO DE ÁUDIO REFINADO ---
-            # 1. Carregamento com tratamento
-            y, sr = librosa.load(uploaded_file, sr=44100)
-            status_text.text("Separando melodia principal via IA...")
-            progress_bar.progress(30)
+with tab3:
+    st.info("O Spotify exige chaves de API. Para este protótipo, use o link do YouTube da mesma música.")
+    st.text_input("Cole o link da música do Spotify")
+
+# --- MOTOR DE CONVERSÃO (O MESMO REFINADO) ---
+if audio_source:
+    if st.button("🪄 CONVERTER PARA KALIMBA"):
+        with st.spinner("IA Processando... Isso pode levar 1 minuto."):
+            # Carregamento
+            y, sr = librosa.load(audio_source, sr=22050)
             
-            # 2. Extração de Melodia (Refinada)
-            # Usamos o algoritmo CQT para melhor resolução em frequências musicais
-            C = np.abs(librosa.cqt(y, sr=sr))
-            status_text.text("Mapeando harmônicos da Kalimba...")
-            progress_bar.progress(60)
-
-            # 3. Síntese Avançada (Modeling de Ressonância)
-            # Simulamos a caixa de ressonância da kalimba e o brilho das notas
-            def advanced_kalimba_synth(freq, dur, sr=44100):
-                if freq <= 0 or np.isnan(freq): return np.zeros(int(dur * sr))
-                t = np.linspace(0, dur, int(dur * sr))
-                
-                # Timbre: Fundamental + 2 Harmônicos Metálicos (Inarmônicos leves)
-                main_tone = np.sin(2 * np.pi * freq * t)
-                overtone = 0.3 * np.sin(2 * np.pi * freq * 2.8 * t) # Brilho metálico
-                
-                # Envelope ADSR de Kalimba (Ataque percussivo)
-                env = np.exp(-7 * t) * (1 - np.exp(-500 * t)) 
-                
-                # Simulação de Reverb de Madeira
-                audio = (main_tone + overtone) * env
-                return audio
-
-            # Detecção de Pitch e Ativação
+            # Análise de Melodia
             pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
             out_audio = np.zeros_like(y)
             
-            # Algoritmo de decisão de notas
-            for i in range(0, pitches.shape[1], 4): # Janelamento para naturalidade
+            # Síntese de Kalimba (Simulada)
+            for i in range(0, pitches.shape[1], 5):
                 index = magnitudes[:, i].argmax()
                 pitch = pitches[index, i]
-                if pitch > 100 and pitch < 2000: # Range da Kalimba
-                    start_sample = i * 512
-                    duration = 0.4
-                    tone = advanced_kalimba_synth(pitch, duration, sr)
+                if pitch > 100:
+                    t = np.linspace(0, 0.4, int(0.4 * sr))
+                    env = np.exp(-7 * t)
+                    note = np.sin(2 * np.pi * pitch * t) * env
                     
-                    # Overlap Add (para não haver cliques)
-                    end_sample = min(start_sample + len(tone), len(out_audio))
-                    out_audio[start_sample:end_sample] += tone[:end_sample-start_sample]
+                    start = i * 512
+                    end = min(start + len(note), len(out_audio))
+                    out_audio[start:end] += note[:end-start]
 
-            # 4. Finalização
+            # Normalização e Resultado
             out_audio = librosa.util.normalize(out_audio)
-            status_text.text("Masterização concluída!")
-            progress_bar.progress(100)
+            sf.write("resultado_kalimba.wav", out_audio, sr)
             
-            sf.write("kalimba_pro.wav", out_audio, sr)
-            st.audio("kalimba_pro.wav")
-            st.download_button("BAIXAR MASTER 24-BIT", open("kalimba_pro.wav", "rb"), "kalimba_master.wav")
-            st.balloons()
+            st.audio("resultado_kalimba.wav")
+            st.download_button("Baixar Música", open("resultado_kalimba.wav", "rb"), "kalimba.wav")
