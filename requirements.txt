@@ -5,3 +5,5 @@ soundfile
 yt-dlp
 scipy
 pydub
+pretty_midi
+fluidsynth
