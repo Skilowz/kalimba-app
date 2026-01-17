@@ -3,3 +3,5 @@ librosa
 numpy
 soundfile
 scipy
+yt-dlp
+spotipy
